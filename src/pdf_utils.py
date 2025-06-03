@@ -6,6 +6,9 @@ from fpdf import FPDF
 from pypdf import PdfWriter, PdfReader
 import fitz  # Import PyMuPDF
 
+# Import the GUI configuration
+from src.gui_config import GUIConfig
+
 # Configure logging (can be configured globally in main if preferred)
 # logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -23,7 +26,7 @@ FONT = 'Arial'
 # --------------------------------
 
 # Placeholder: Needs toc_data to include 'filepath' column corresponding to page_map keys
-def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_path: Path) -> tuple[Path | None, int | None]:
+def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_path: Path, config: GUIConfig = None) -> tuple[Path | None, int | None]:
     """Generates a PDF file for the Table of Contents with actual page numbers.
     No links are added at this stage - they will be added to the final document.
 
@@ -32,12 +35,29 @@ def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_pa
         page_map: Dictionary mapping filepath strings (lowercase) to their 1-based starting
                   page number in the content PDF.
         output_path: The path where the final TOC PDF will be saved.
+        config: GUIConfig object containing PDF settings (optional, uses defaults if None)
 
     Returns:
         A tuple containing:
             - The path to the generated TOC PDF if successful, None otherwise.
             - The number of pages in the generated TOC PDF, None otherwise.
     """
+    # Use config values or defaults
+    if config:
+        PAGE_WIDTH_MM = config.page_width_mm
+        MARGIN_MM = config.margin_mm
+        FONT_SIZE = config.font_size
+        HEADER_FONT_SIZE = config.header_font_size
+    else:
+        PAGE_WIDTH_MM = 210  # A4 width
+        MARGIN_MM = 15
+        FONT_SIZE = 8
+        HEADER_FONT_SIZE = 10
+    
+    CONTENT_WIDTH_MM = PAGE_WIDTH_MM - 2 * MARGIN_MM
+    LINE_HEIGHT = 6
+    FONT = 'Arial'
+    
     logging.info(f"--- Generating Final Table of Contents PDF to {output_path.name} ---")
     if toc_data.empty:
         logging.warning("TOC data is empty, skipping TOC PDF creation.")
@@ -54,6 +74,7 @@ def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_pa
         pdf_calc.set_margins(left=MARGIN_MM, top=MARGIN_MM, right=MARGIN_MM)
         pdf_calc.add_page()
         pdf_calc.set_font(FONT, '', FONT_SIZE)
+        pdf_calc.set_text_color(0, 0, 255)  # Set text color to blue
         pdf_calc.set_font_size(12)
         pdf_calc.cell(CONTENT_WIDTH_MM, 10, "14. TABLES, FIGURES AND GRAPHS REFERRED TO BUT NOT INCLUDED IN THE TEXT", 0, 1, 'L')
         pdf_calc.ln(5)
@@ -68,6 +89,7 @@ def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_pa
             elif row['type'] == 'entry':
                 # Simplified layout for calculation pass
                 pdf_calc.set_font(FONT, '', FONT_SIZE)
+                pdf_calc.set_text_color(0, 0, 255)  # Set text color to blue for entries
                 indent = "  " * (row['level'] - 1)
                 formatted_text = indent + str(row['text'])
                 pdf_calc.cell(CONTENT_WIDTH_MM * 0.8, LINE_HEIGHT, formatted_text, 0, 0) # Approximate width
@@ -83,6 +105,7 @@ def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_pa
         pdf.set_margins(left=MARGIN_MM, top=MARGIN_MM, right=MARGIN_MM)
         pdf.add_page()
         pdf.set_font(FONT, '', FONT_SIZE) # Use standard font
+        pdf.set_text_color(0, 0, 255)  # Set text color to blue
 
         # Add TOC Title
         pdf.set_font_size(12)
@@ -106,6 +129,7 @@ def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_pa
 
             if entry_type == 'header':
                 pdf.set_font(FONT, 'B', HEADER_FONT_SIZE) # Bold for headers
+                pdf.set_text_color(0, 0, 0)  # Black color for headers
                 pdf.ln(LINE_HEIGHT * 0.25) # Reduced space before header
                 pdf.multi_cell(CONTENT_WIDTH_MM, LINE_HEIGHT, text, 0, 'L')
                 pdf.ln(LINE_HEIGHT * 0.25) # Reduced space after header
@@ -127,6 +151,7 @@ def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_pa
 
             elif entry_type == 'entry':
                 pdf.set_font(FONT, '', FONT_SIZE) # Ensure normal font for entries
+                pdf.set_text_color(0, 0, 255)  # Blue color for entries
                 indent = "  " * (level - 1)
                 formatted_text = indent + text
 
@@ -322,6 +347,16 @@ def prepend_toc_to_pdf(toc_pdf_path: Path, content_pdf_path: Path, final_output_
     logging.info(f"--- Prepending TOC ({toc_pdf_path.name}) to Content ({content_pdf_path.name}) ---")
 
     try:
+        # Detect if we're in automatic or manual mode by examining section numbers
+        is_automatic_mode = False
+        if not final_df.empty and 'section_number' in final_df.columns:
+            sample_section_numbers = final_df['section_number'].unique()[:3]
+            # If section numbers are simple digits (1, 2, 3) rather than decimal format (14.1, 14.3)
+            is_automatic_mode = all(str(sn).isdigit() and int(str(sn)) <= 10 for sn in sample_section_numbers if pd.notna(sn))
+        
+        mode_name = "Automatic" if is_automatic_mode else "Manual"
+        logging.info(f"Detected {mode_name} section mode for hyperlink creation")
+
         # Use PyPDF to combine PDFs (simpler, more reliable)
         merger = PdfWriter()
         
@@ -359,7 +394,7 @@ def prepend_toc_to_pdf(toc_pdf_path: Path, content_pdf_path: Path, final_output_
         
         # If we have TOC entries, create links
         if toc_entries:
-            logging.debug(f"Creating {len(toc_entries)} links in the TOC...")
+            logging.debug(f"Creating {len(toc_entries)} links in the TOC using {mode_name} mode logic...")
             # Log some sample page mappings for debugging
             logging.info(f"TOC page count: {num_toc_pages}, Content page count: {num_content_pages}")
             logging.info(f"Sample of page_map entries: {list(page_map.items())[:3]}...")
@@ -369,155 +404,211 @@ def prepend_toc_to_pdf(toc_pdf_path: Path, content_pdf_path: Path, final_output_
             entries = [e for e in toc_entries if not e.get('is_header', False)]
             logging.info(f"TOC contains {len(headers)} section headers and {len(entries)} document entries")
             
-            # Pre-identify all section header lines in the document for robust detection
-            section_header_lines = []
-            main_title_line = None  # Store the main title line info
+            # Initialize variables that will be used later in bookmark generation
+            main_title_line = None
             
-            # Scan through all pages in TOC
-            for page_idx in range(min(num_toc_pages, 3)):  # Check first 3 pages max
-                page = doc[page_idx]
-                text_blocks = page.get_text("dict")["blocks"]
-                for block in text_blocks:
-                    for line in block.get("lines", []):
-                        line_text = "".join(span.get("text", "") for span in line.get("spans", []))
-                        line_text_stripped = line_text.strip()
-                        
-                        # Check for main title (14. TABLES, FIGURES AND GRAPHS...)
-                        if line_text_stripped.startswith("14. TABLES") or "TABLES, FIGURES AND GRAPHS" in line_text_stripped:
-                            main_title_line = {
-                                'page': page_idx,
-                                'rect': fitz.Rect(line["bbox"]),
-                                'text': line_text_stripped
-                            }
-                            logging.info(f"Identified main title on page {page_idx+1}: '{line_text_stripped}'")
-                            continue
-                        
-                        # Check for section header patterns - find patterns like "14.1 Something" or "14.3 Something"
-                        # Look for decimal-formatted section numbers followed by text
-                        if (line_text_stripped and
-                            any(header['text'] in line_text for header in headers) or
-                            (len(line_text_stripped.split()) >= 2 and 
-                             any(line_text_stripped.startswith(f"{i}.{j}") for i in range(10, 20) for j in range(1, 10)))):
-                            # Store rect and text for this header line
-                            section_header_lines.append({
-                                'page': page_idx,
-                                'rect': fitz.Rect(line["bbox"]),
-                                'text': line_text_stripped
-                            })
-                            logging.info(f"Identified section header line on page {page_idx+1}: '{line_text_stripped}'")
-            
-            logging.info(f"Identified {len(section_header_lines)} section header lines in the TOC")
-            
-            for entry in toc_entries:
-                # Skip header entries - they don't get hyperlinks in the TOC
-                if entry.get('is_header', False):
-                    logging.debug(f"Skipping link creation for header: {entry['text']}")
-                    continue
-                    
-                # Skip entries with no target page
-                if entry.get('target_page') is None:
-                    logging.debug(f"Skipping link creation for entry with no target page: {entry['text']}")
-                    continue
-                    
-                toc_page_idx = entry['toc_page'] - 1  # Convert 1-based to 0-based
-                target_page_idx = entry['target_page'] - 1  # Convert 1-based to 0-based
+            # Create hyperlinks using mode-specific logic
+            if is_automatic_mode:
+                # Automatic mode: sections are "1 Tables", "2 Figures", "3 Listings"
+                logging.info("Using automatic mode hyperlink creation logic")
                 
-                # Debug FEFOS01A specifically
-                if "FEFOS01A" in entry['text']:
-                    logging.info(f"FEFOS01A entry found: Text={entry['text']}")
-                    logging.info(f"FEFOS01A page numbers: toc_page={entry['toc_page']}, target_page={entry['target_page']}")
-                
-                # Get the page and its dimensions
-                page = doc[toc_page_idx]
-                width, height = page.rect.width, page.rect.height
-                
-                # Find the line with the page number in it
-                text_blocks = page.get_text("dict")["blocks"]
-                for block in text_blocks:
-                    for line in block.get("lines", []):
-                        line_text = "".join(span.get("text", "") for span in line.get("spans", []))
-                        
-                        # Get the rectangle for this line
-                        rect = fitz.Rect(line["bbox"])
-                        
-                        # Check if this line is the main title - never add hyperlinks to it
-                        if main_title_line and main_title_line['page'] == toc_page_idx and main_title_line['rect'].intersects(rect):
-                            logging.info(f"Skipping hyperlink for main title: '{line_text.strip()}'")
-                            continue
-                        
-                        # Check if this line is a section header by comparing its rectangle with our pre-identified headers
-                        is_section_header = False
-                        for header_line in section_header_lines:
-                            if header_line['page'] == toc_page_idx and header_line['rect'].intersects(rect):
-                                is_section_header = True
-                                logging.info(f"Found matching section header: '{line_text.strip()}'")
+                # Find main title line for bookmark generation
+                for page_idx in range(min(num_toc_pages, 3)):  # Check first 3 pages max
+                    page = doc[page_idx]
+                    text_blocks = page.get_text("dict")["blocks"]
+                    for block in text_blocks:
+                        for line in block.get("lines", []):
+                            line_text = "".join(span.get("text", "") for span in line.get("spans", []))
+                            line_text_stripped = line_text.strip()
+                            
+                            # Check for main title
+                            if line_text_stripped.startswith("14. TABLES") or "TABLES, FIGURES AND GRAPHS" in line_text_stripped:
+                                main_title_line = {
+                                    'page': page_idx,
+                                    'rect': fitz.Rect(line["bbox"]),
+                                    'text': line_text_stripped
+                                }
+                                logging.info(f"Identified main title on page {page_idx+1}: '{line_text_stripped}'")
                                 break
-                        
-                        # Skip section headers - don't add hyperlinks
-                        if is_section_header:
-                            logging.info(f"Skipping hyperlink for section header: '{line_text.strip()}'")
-                            continue
-                        
-                        # Special check for section header lines
-                        # Don't add hyperlinks to these lines even if they appear in regular entries
-                        line_text_stripped = line_text.strip()
-                        if (len(line_text_stripped.split()) >= 2 and 
-                            any(line_text_stripped.startswith(f"{i}.{j}") for i in range(10, 20) for j in range(1, 10))):
-                            # This looks like a section header line (e.g., "14.1 Something"), don't add a link
-                            logging.info(f"Skipping link creation for section header pattern: '{line_text_stripped}'")
-                            continue
-                        
-                        # If this line contains both the TOC text and the target page number
-                        text_to_find = entry['page_num_str']
-                        
-                        # For any entry, check if this line contains the text and/or page number
-                        # Look for either the text content or the page number in this line
-                        if text_to_find in line_text or any(part in line_text for part in entry['text'].split()[:3]):
-                            logging.info(f"Found match for entry: '{entry['text'][:30]}...' with page {text_to_find}")
-                            
-                            # Use the entry's target page
-                            target_page = target_page_idx
-                            
-                            # Expand the rectangle to ensure it covers the full width of the text area
-                            # This ensures dots and page numbers are included in the highlighting
-                            content_width = page.rect.width - 2 * MARGIN_MM
-                            expanded_rect = fitz.Rect(
-                                MARGIN_MM,          # Left margin
-                                rect.y0,            # Keep original top position
-                                page.rect.width - MARGIN_MM,  # Right margin
-                                rect.y1             # Keep original bottom position
-                            )
-                            
-                            # Create a link to the target page for the entire expanded line
-                            page.insert_link({
-                                "kind": fitz.LINK_GOTO,
-                                "from": expanded_rect,
-                                "page": target_page,
-                                "zoom": 0
-                            })
-                            
-                            # Create a nice-looking blue hyperlink appearance
-                            
-                            # 1. Draw blue text highlight with overlay blend mode
-                            # Create a new shape for this link
-                            shape = page.new_shape()
-                            
-                            # Draw a rectangle with very light blue fill over the full text width
-                            shape.draw_rect(expanded_rect)
-                            # Use color overlay effect to make it look like blue text
-                            shape.finish(fill=(0, 0, 1), color=None, fill_opacity=0.2)
-                            # Apply the shape
-                            shape.commit(overlay=True)
-                            
-                            # 2. Draw a blue underline beneath the link text
-                            # Get bottom left and bottom right points of the expanded rectangle
-                            bl = expanded_rect.bl  # bottom left 
-                            br = expanded_rect.br  # bottom right
-                            # Draw a line with a blue color
-                            page.draw_line(bl, br, color=(0, 0, 1), width=0.5, overlay=True)
-                            
-                            logging.debug(f"Added link from TOC page {toc_page_idx+1} to target page {target_page_idx+1}")
+                        if main_title_line:  # Break out of outer loop too
                             break
+                    if main_title_line:  # Break out of page loop
+                        break
+                
+                for entry in toc_entries:
+                    # Skip header entries - they don't get hyperlinks in the TOC
+                    if entry.get('is_header', False):
+                        logging.debug(f"Skipping link creation for header: {entry['text']}")
+                        continue
+                        
+                    # Skip entries with no target page
+                    if entry.get('target_page') is None:
+                        logging.debug(f"Skipping link creation for entry with no target page: {entry['text']}")
+                        continue
+                        
+                    toc_page_idx = entry['toc_page'] - 1  # Convert 1-based to 0-based
+                    target_page_idx = entry['target_page'] - 1  # Convert 1-based to 0-based
+                    
+                    # Get the page
+                    page = doc[toc_page_idx]
+                    
+                    # Find the line with this entry's text and page number
+                    text_blocks = page.get_text("dict")["blocks"]
+                    for block in text_blocks:
+                        for line in block.get("lines", []):
+                            line_text = "".join(span.get("text", "") for span in line.get("spans", []))
+                            line_text_stripped = line_text.strip()
+                            
+                            # Skip section headers in automatic mode (format: "1 Tables", "2 Figures", "3 Listings")
+                            if (len(line_text_stripped.split()) >= 2 and
+                                line_text_stripped.split()[0].isdigit() and
+                                any(word.lower() in ['tables', 'figures', 'listings'] for word in line_text_stripped.split()[1:])):
+                                logging.debug(f"Skipping automatic mode section header: '{line_text_stripped}'")
+                                continue
+                            
+                            # Skip main title
+                            if "TABLES, FIGURES AND GRAPHS" in line_text_stripped:
+                                continue
+                            
+                            # Check if this line contains the entry's page number and looks like a TOC entry
+                            page_num_str = entry['page_num_str']
+                            entry_text_clean = clean_text(entry['text']).strip()
+                            
+                            # For automatic mode, look for lines that:
+                            # 1. Contain the page number at the end
+                            # 2. Are not section headers
+                            # 3. Have dots leading to the page number (typical TOC format)
+                            if (page_num_str in line_text and 
+                                not line_text_stripped.split()[0].isdigit() and  # Not a section header
+                                ('.' * 3) in line_text and  # Has dots (TOC format)
+                                line_text.strip().endswith(page_num_str)):  # Ends with page number
+                                
+                                logging.info(f"Auto mode: Found TOC entry line for page {page_num_str}: '{line_text_stripped[:50]}...'")
+                                
+                                # Create hyperlink for the entire line
+                                rect = fitz.Rect(line["bbox"])
+                                expanded_rect = fitz.Rect(
+                                    MARGIN_MM,
+                                    rect.y0,
+                                    page.rect.width - MARGIN_MM,
+                                    rect.y1
+                                )
+                                
+                                page.insert_link({
+                                    "kind": fitz.LINK_GOTO,
+                                    "from": expanded_rect,
+                                    "page": target_page_idx,
+                                    "zoom": 0
+                                })
+                                
+                                logging.debug(f"Added automatic mode link from TOC page {toc_page_idx+1} to target page {target_page_idx+1}")
+                                break
+            else:
+                # Manual mode: sections are "14.1 Something", "14.3 Something"
+                logging.info("Using manual mode hyperlink creation logic")
+                
+                # Pre-identify all section header lines for robust detection
+                section_header_lines = []
+                main_title_line = None
+                
+                # Scan through all pages in TOC
+                for page_idx in range(min(num_toc_pages, 3)):  # Check first 3 pages max
+                    page = doc[page_idx]
+                    text_blocks = page.get_text("dict")["blocks"]
+                    for block in text_blocks:
+                        for line in block.get("lines", []):
+                            line_text = "".join(span.get("text", "") for span in line.get("spans", []))
+                            line_text_stripped = line_text.strip()
+                            
+                            # Check for main title
+                            if line_text_stripped.startswith("14. TABLES") or "TABLES, FIGURES AND GRAPHS" in line_text_stripped:
+                                main_title_line = {
+                                    'page': page_idx,
+                                    'rect': fitz.Rect(line["bbox"]),
+                                    'text': line_text_stripped
+                                }
+                                logging.info(f"Identified main title on page {page_idx+1}: '{line_text_stripped}'")
+                                continue
+                            
+                            # Check for manual mode section header patterns (14.1, 14.3, etc.)
+                            if (line_text_stripped and
+                                len(line_text_stripped.split()) >= 2 and 
+                                any(line_text_stripped.startswith(f"{i}.{j}") for i in range(10, 20) for j in range(1, 10))):
+                                section_header_lines.append({
+                                    'page': page_idx,
+                                    'rect': fitz.Rect(line["bbox"]),
+                                    'text': line_text_stripped
+                                })
+                                logging.info(f"Identified manual mode section header line on page {page_idx+1}: '{line_text_stripped}'")
+                
+                for entry in toc_entries:
+                    # Skip header entries - they don't get hyperlinks in the TOC
+                    if entry.get('is_header', False):
+                        logging.debug(f"Skipping link creation for header: {entry['text']}")
+                        continue
+                        
+                    # Skip entries with no target page
+                    if entry.get('target_page') is None:
+                        logging.debug(f"Skipping link creation for entry with no target page: {entry['text']}")
+                        continue
+                        
+                    toc_page_idx = entry['toc_page'] - 1  # Convert 1-based to 0-based
+                    target_page_idx = entry['target_page'] - 1  # Convert 1-based to 0-based
+                    
+                    # Get the page
+                    page = doc[toc_page_idx]
+                    
+                    # Find the line with the page number in it
+                    text_blocks = page.get_text("dict")["blocks"]
+                    for block in text_blocks:
+                        for line in block.get("lines", []):
+                            line_text = "".join(span.get("text", "") for span in line.get("spans", []))
+                            
+                            # Get the rectangle for this line
+                            rect = fitz.Rect(line["bbox"])
+                            
+                            # Check if this line is the main title - never add hyperlinks to it
+                            if main_title_line and main_title_line['page'] == toc_page_idx and main_title_line['rect'].intersects(rect):
+                                logging.debug(f"Skipping hyperlink for main title: '{line_text.strip()}'")
+                                continue
+                            
+                            # Check if this line is a section header
+                            is_section_header = False
+                            for header_line in section_header_lines:
+                                if header_line['page'] == toc_page_idx and header_line['rect'].intersects(rect):
+                                    is_section_header = True
+                                    logging.debug(f"Found matching section header: '{line_text.strip()}'")
+                                    break
+                            
+                            # Skip section headers - don't add hyperlinks
+                            if is_section_header:
+                                logging.debug(f"Skipping hyperlink for section header: '{line_text.strip()}'")
+                                continue
+                            
+                            # If this line contains the target page number and looks like a TOC entry
+                            text_to_find = entry['page_num_str']
+                            
+                            # For manual mode, look for lines that contain the page number
+                            if text_to_find in line_text and line_text.strip().endswith(text_to_find):
+                                logging.info(f"Manual mode: Found match for entry with page {text_to_find}: '{line_text.strip()[:50]}...'")
+                                
+                                # Create hyperlink for the entire line
+                                expanded_rect = fitz.Rect(
+                                    MARGIN_MM,
+                                    rect.y0,
+                                    page.rect.width - MARGIN_MM,
+                                    rect.y1
+                                )
+                                
+                                page.insert_link({
+                                    "kind": fitz.LINK_GOTO,
+                                    "from": expanded_rect,
+                                    "page": target_page_idx,
+                                    "zoom": 0
+                                })
+                                
+                                logging.debug(f"Added manual mode link from TOC page {toc_page_idx+1} to target page {target_page_idx+1}")
+                                break
         
         # Generate bookmarks
         final_bookmarks = []
@@ -538,13 +629,24 @@ def prepend_toc_to_pdf(toc_pdf_path: Path, content_pdf_path: Path, final_output_
             if toc_entries:
                 for entry in toc_entries:
                     if entry.get('is_header', False):
-                        # Extract section number from header text (expecting format like "14.1 Demographic Data")
+                        # Extract section number from header text (expecting format like "14.1 Demographic Data" for manual mode
+                        # or "1 Tables", "2 Figures", "3 Listings" for automatic mode)
                         text_parts = entry['text'].strip().split()
+                        section_num = None
+                        
+                        # Check for manual mode format (e.g., "14.1", "14.3")
                         if text_parts and any(part.startswith(('14.1', '14.3')) for part in text_parts):
                             section_num = text_parts[0]  # Get '14.1' or '14.3' part
+                        # Check for automatic mode format (e.g., "1 Tables", "2 Figures", "3 Listings")
+                        elif (text_parts and len(text_parts) >= 2 and
+                              text_parts[0].isdigit() and
+                              any(word.lower() in ['tables', 'figures', 'listings'] for word in text_parts[1:])):
+                            section_num = text_parts[0]  # Get '1', '2', or '3' part
+                        
+                        if section_num:
                             section_to_toc_page[section_num] = entry['toc_page']
                             logging.info(f"Found section header {section_num} on TOC page {entry['toc_page']}")
-                        
+            
             # Group files by section number
             section_groups = {}
             
@@ -597,17 +699,12 @@ def prepend_toc_to_pdf(toc_pdf_path: Path, content_pdf_path: Path, final_output_
                 
                 # Find the TOC page for this section (if available)
                 toc_page = 1  # Default to first page of TOC
-                # Convert section_number (like '14.1') to the format in section_to_toc_page
+                # Convert section_number to the format used in section_to_toc_page
                 section_key = section_number
-                if '.' not in section_key:
-                    # Try to infer the subsection number
-                    if section_number.startswith('14'):
-                        if section_number == '14':
-                            section_key = '14'  # Main section
-                        else:
-                            # Extract subsection from filename like '14/1' or similar pattern
-                            subsection = section_number.replace('14', '')
-                            section_key = f"14.{subsection}"
+                
+                # For automatic mode, section_number will be "1", "2", "3" etc.
+                # For manual mode, section_number will be "14.1", "14.3" etc.
+                # No conversion needed - use section_number directly
                 
                 # Get TOC page for this section or use main TOC page
                 if section_key in section_to_toc_page:

@@ -86,11 +86,6 @@ def convert_rtf_to_pdf(rtf_path: str, pdf_path: str, title: str = None) -> bool:
         doc.SaveAs(pdf_abs, FileFormat=WD_FORMAT_PDF)
         logging.info("PDF conversion succeeded.")
 
-        # Add bookmark if requested
-        # <<< Commenting out bookmark addition during RTF conversion >>>
-        # if title:
-        #     _add_bookmark(pdf, title)
-
         return True
 
     except Exception as e:
@@ -123,10 +118,6 @@ def convert_rtf_to_pdf(rtf_path: str, pdf_path: str, title: str = None) -> bool:
                 # Release COM objects and collect garbage
                 doc = None
                 word = None
-                # Explicitly call com release (optional, DispatchEx might handle it)
-                # if sys.platform == 'win32' and win32com:
-                #    win32com.client.pythoncom.CoUninitialize()
-                #    win32com.client.pythoncom.CoInitialize()
                 logging.debug(f"Running garbage collection after {rtf.name}")
                 gc.collect()
                 logging.debug(f"Garbage collection finished after {rtf.name}")

@@ -30,7 +30,7 @@ Users who need to regularly combine multiple RTF reports/documents (e.g., regula
 ## 2. Functional Requirements
 
 ### FR1: Input Processing  
-The tool must accept the following inputs via CLI arguments:  
+The tool must accept the following inputs:  
 1. Path to the input folder containing RTF files  
 2. Path to the user-provided Excel file mapping output_name to section_number  
 3. Path to the output folder for the final PDF and any reports  
@@ -38,7 +38,7 @@ The tool must accept the following inputs via CLI arguments:
 
 ### FR2: RTF Parsing  
 For each `.rtf` file in the input folder:  
-- Read the file content  
+- Read the file content using appropriate error handling
 - Extract plain text using the `striprtf` library  
 - Determine the document title  
   - Use the first non-empty line of the extracted text as the title  
@@ -46,51 +46,77 @@ For each `.rtf` file in the input folder:
   - Use the RTF filename without the `.rtf` extension 
 
 ### FR3: RTF → PDF Conversion  
-- Convert each RTF file into an individual PDF  
+- Convert each RTF file into an individual PDF using Microsoft Word COM automation
 - Save each PDF into a `_pdf` subfolder within the main output directory  
-- Embed a PDF bookmark in each individual PDF using the extracted title  
-- **Dependency:** Requires Microsoft Word for RTF-to-PDF conversion via COM automation or similar interface
+- **Dependency:** Requires Microsoft Word for RTF-to-PDF conversion via COM automation
 
 ### FR4: Data Management & Merging  
-1. Build an in-memory structure (e.g., `pandas.DataFrame rtf_title`) mapping output_name → title for all RTFs  
+1. Build an in-memory structure mapping output_name → title for all RTFs  
 2. Read the user-provided Excel file (output_name, section_number)  
-3. Read the ICH section mapping Excel file (section_number, ICH_section_name) stored in docs folder.  
-4. Merge the two Excel data sources on section_number → `ich_number_categories`  
-5. Merge `rtf_title` with `ich_number_categories` on output_name  
+3. Read the ICH section mapping Excel file (section_number, ICH_section_name)  
+4. Merge the two Excel data sources on section_number  
+5. Merge the RTF title data with the combined Excel data on output_name  
 6. Retain only records present in both sources for TOC generation  
-7. Generate a mismatch report (`mismatches.csv`) listing output_names present in only one source
+7. Generate a mismatch report listing output_names present in only one source
 
 ### FR5: TOC Generation  
-- Generate a separate TOC PDF (`toc_temp.pdf`)  
+- Generate a separate TOC PDF using FPDF
 - Order TOC by section_number, then by RTF order within each section 
-- For each section, add a header:  
-- Under each section, list each document’s title  
-- Use placeholder page numbers (e.g., “XX”) initially  
-- Add PDF bookmarks in the TOC pointing to each section header
+- For each section, add a header with section number and ICH section name
+- Under each section, list each document's title with page numbers
+- Store TOC entry information for later link creation
 
 ### FR6: PDF Combination  
-1. Merge all individual PDFs from `_pdf/` into `combined_pdf_temp.pdf` following TOC order  
-2. Concatenate `toc_temp.pdf` + `combined_pdf_temp.pdf` → `final_temp.pdf`
+1. Combine all individual PDFs into an intermediate combined PDF following TOC order
+2. Create a page map tracking the start page of each document
+3. Generate the TOC with accurate page numbers using the page map
+4. Prepend the TOC to the combined content PDF
 
-### FR7: TOC Finalization & Bookmarking  
-- Calculate actual page numbers for each TOC entry in `final_temp.pdf` (account for TOC length)  
-- Replace placeholder page numbers in the TOC  
-- Update section-header bookmarks to point to the corresponding section header on toc page in the final document  
-- Ensure individual document bookmarks from FR3 are preserved and functional
+### FR7: Bookmarks & Navigation  
+- Set PDF bookmarks for both TOC section headers and document entries
+- Ensure bookmarks link to the correct pages in the combined document
+- Add navigational links from TOC entries to the corresponding content pages
 
 ### FR8: Output Generation  
-- Save the final PDF (with updated TOC & bookmarks) as `Combined_Document.pdf` in the output folder  
-- Save the mismatch report (`mismatches.csv`) in the output folder  
-- Clean up temporary files (`_pdf/`, `*_temp.pdf`), unless a debug flag is set
+- Save the final PDF (with updated TOC & bookmarks) in the output folder  
+- Clean up temporary files and intermediate PDFs
+- Provide detailed logging throughout the process
 
 ---
 
 ## 3. Non-Functional Requirements
 
-- **Reliability:** Robust error handling (try/except) for file I/O, parsing, conversion, merging; clear error logs  
-- **Maintainability:** Modular code (separate functions/classes); use OOP where beneficial; adhere to PEP 8  
-- **Usability:** Clear CLI instructions (`--help`); informative status messages during processing  
-- **Dependencies:** List all external dependencies in `requirements.txt` (e.g., `pandas`, `striprtf`, `pypdf`/`PyPDF2`, `reportlab`; or external tools like `unoconv`)
-- **Python PDF libraries:** FPDF and Fitz will be used.
+### Modular Design
+- Code is organized into separate modules with clear responsibilities:
+  - `rtf_parser.py`: Handles RTF file reading and title extraction
+  - `rtf_converter.py`: Manages RTF to PDF conversion via Word COM
+  - `data_processing.py`: Handles data loading, merging, and validation
+  - `pdf_utils.py`: Provides PDF generation, combination, and bookmarking
+
+### Reliability
+- Robust error handling with appropriate try/except blocks
+- Comprehensive logging of operations, warnings, and errors
+- Graceful handling of partial failures (e.g., if some RTFs fail to convert)
+
+### Performance
+- Efficient PDF processing using PyMuPDF (fitz) and pypdf libraries
+- Two-pass approach for TOC generation to ensure accurate page numbers
+
+### Maintainability
+- Clear code structure with well-named functions and variables
+- Consistent logging at appropriate levels
+- Type hints for improved code readability and IDE support
+
+### Dependencies
+- **Python Libraries:**
+  - `pandas`: For data manipulation and Excel file processing
+  - `striprtf`: For extracting text from RTF files
+  - `fpdf`: For TOC PDF generation
+  - `pypdf`: For PDF merging and manipulation
+  - `PyMuPDF` (fitz): For handling PDF bookmarks
+  - `pywin32`: For Windows COM automation (on Windows only)
+- **External Dependencies:**
+  - Microsoft Word: Required for RTF-to-PDF conversion
+  - Windows OS: For Word COM automation
 ---
 

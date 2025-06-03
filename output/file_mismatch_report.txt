@@ -1,0 +1,23 @@
+FILE MISMATCH REPORT - MANUAL MODE
+==================================================
+
+SUMMARY:
+- Total files in input folder: 4
+- Total files in section file: 3
+- Files successfully matched: 3
+- Total mismatched files: 1
+
+FILES IN INPUT FOLDER BUT NOT IN SECTION FILE (1):
+------------------------------------------------------------
+  • lsitfh01
+
+ACTION NEEDED: Add these files to your section mapping file or remove them from the input folder.
+
+SUCCESSFULLY MATCHED FILES (3):
+------------------------------------------------------------
+  ✓ fefos01a
+  ✓ tsidm01
+  ✓ tsids01
+
+
+Generated on: 2025-05-29 12:20:33

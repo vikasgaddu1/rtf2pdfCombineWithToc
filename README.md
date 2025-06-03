@@ -1,135 +1,159 @@
-# RTF2CombinePDFwithTOC
+# RTF to PDF Converter with TOC
 
-A utility for converting RTF files to PDF, generating a table of contents, and combining them into a single hyperlinked PDF document with bookmarks.
+A Python application that converts RTF files to PDF and combines them into a single PDF document with a table of contents and bookmarks.
 
 ## Features
 
-- Converts RTF files to PDFs
-- Extracts titles from RTF files automatically
-- Maps files to their respective sections using configuration files
-- Generates a Table of Contents (TOC) based on document structure
-- Combines individual PDFs into a single document
-- Adds hyperlinks from TOC entries to corresponding content pages
-- Creates hierarchical bookmarks for easy navigation
+- Convert multiple RTF files to PDF
+- Automatic or manual section organization
+- Generate table of contents with page numbers
+- Create PDF bookmarks for easy navigation
+- Modern GUI interface with progress tracking
+- Configurable PDF settings
+- Real-time conversion progress
+- Detailed logging
+- Support for both automatic and manual section organization
+- All settings configured through the GUI (no configuration files)
 
 ## Requirements
 
-- Python 3.8 or higher
-- Dependencies (see requirements.txt):
+- Windows OS (uses Word COM automation)
+- Python 3.6 or higher
+- Microsoft Word installed
+- Required Python packages (install via `pip install -r requirements.txt`):
   - pandas
-  - xlrd
-  - striprtf (for extracting text from RTF)
   - fpdf2
   - pypdf
   - PyMuPDF (fitz)
-  - win32com (for Windows users, to handle Word processes)
+  - pywin32
 
 ## Installation
 
-1. Clone this repository:
-   ```
-   git clone https://github.com/yourusername/RTF2CombinePDFwithTOC.git
-   cd RTF2CombinePDFwithTOC
-   ```
-
-2. Create a virtual environment (recommended):
-   ```
-   python -m venv venv
-   # On Windows
-   venv\Scripts\activate
-   # On macOS/Linux
-   source venv/bin/activate
-   ```
-
-3. Install the required dependencies:
-   ```
-   pip install -r requirements.txt
-   ```
-
-## Directory Structure
-
-The utility expects the following directory structure:
-
-```
-rtf2pdfcombine/
-├── main.py             # Main script
-├── input/              # Place your RTF files here
-├── output/             # Final and intermediate PDFs will be created here
-│   └── _pdf/           # Individual converted PDFs (intermediate)
-├── docs/               # Configuration files
-│   ├── filename_section.xlsx  # Maps filenames to sections
-│   └── iche3_categories.xlsx  # Defines ICH section categories
-└── src/                # Source code modules
-    ├── rtf_parser.py   # Extracts titles from RTF files
-    ├── data_processing.py  # Handles data merging and validation
-    └── pdf_utils.py    # PDF generation utilities
+1. Clone the repository:
+```bash
+git clone <repository-url>
+cd rtf2pdfcombine
 ```
 
-## Configuration Files
+2. Create and activate a virtual environment (recommended):
+```bash
+python -m venv .venv
+.venv\Scripts\activate  # Windows
+```
 
-1. **filename_section.xlsx**: Maps each RTF filename to its section number
-   - Should contain at least columns for filename and section_number
-
-2. **iche3_categories.xlsx**: Contains information about ICH section categories
-   - Used to create proper section headers in TOC and bookmarks
+3. Install required packages:
+```bash
+pip install -r requirements.txt
+```
 
 ## Usage
 
-1. Place all your RTF files in the `input` directory
-2. Ensure your configuration files are correctly set up in the `docs` directory
-3. Run the main script:
-   ```
-   python main.py
-   ```
-4. The final PDF with TOC and hyperlinks will be created in the `output` directory as `final_document_with_toc.pdf`
+### Running the Application
 
-## Processing Steps
+1. Launch the GUI:
+```bash
+python run_gui.py
+```
 
-1. Scans RTF files and extracts titles
-2. Loads mapping files for section organization
-3. Merges and validates data
-4. Creates TOC data structure
-5. Converts RTF files to individual PDFs
-6. Combines PDFs and creates bookmarks
-7. Generates final TOC with hyperlinks
-8. Prepends TOC to content PDF to create final document
-9. Cleans up intermediate files
+2. Configure the settings in the GUI:
+   - **Input Folder**: Select the folder containing RTF files
+   - **Output Folder**: Choose where to save the generated PDFs
+   - **Output Filename**: Name for the final combined PDF
+   - **Section Settings**:
+     - Automatic: Files are organized based on filename prefixes (t, f, l)
+     - Manual: Use an Excel file to define sections
+   - **PDF Options**:
+     - Page Width (mm): Default 210 (A4)
+     - Margin (mm): Default 15
+     - Font Size: Default 8
+     - Header Font Size: Default 10
 
-## Customization
+3. Click "Process Files" to start the conversion
 
-To modify the default behavior:
+### File Organization
 
-1. Edit paths in `main.py` to change input/output directories
-2. Adjust PDF layout constants in `src/pdf_utils.py`
-3. Modify TOC title and formatting in `generate_toc_pdf()`
+#### Automatic Section Mode
+Files are automatically organized based on their filename prefixes:
+- `t*`: Tables (Section 1)
+- `f*`: Figures (Section 2)
+- `l*`: Listings (Section 3)
+
+#### Manual Section Mode
+Use an Excel file (`filename_section.xlsx`) with the following columns:
+- `filename`: RTF filename (without extension)
+- `section_number`: Section number (e.g., "14.1")
+- `ICH_section_name`: Section name
+
+### Output
+
+The application generates:
+1. Individual PDF files in the `_pdf` subfolder
+2. A combined PDF with table of contents and bookmarks
+3. Log output in the GUI showing conversion progress
+
+## Project Structure
+
+```
+rtf2pdfcombine/
+├── run_gui.py              # GUI launcher
+├── main.py                 # Main processing logic
+├── requirements.txt        # Python dependencies
+├── input/                  # Input RTF files
+├── output/                 # Generated PDFs
+│   └── _pdf/              # Individual PDFs
+├── docs/                   # Documentation and mapping files
+└── src/
+    ├── gui.py             # GUI implementation
+    ├── gui_config.py      # GUI configuration holder
+    ├── rtf_converter.py   # RTF to PDF conversion
+    ├── rtf_parser.py      # RTF title extraction
+    ├── data_processing.py # Data handling and validation
+    └── pdf_utils.py       # PDF generation utilities
+```
+
+## GUI Settings
+
+All application settings are configured through the GUI interface:
+
+- **Input/Output Paths**: Browse and select folders directly
+- **Section Mode**: Toggle between automatic and manual modes
+- **PDF Settings**: Adjust page layout and font sizes
+- **No Configuration Files**: All settings are passed directly from the GUI to the processing engine
 
 ## Troubleshooting
 
-- If hyperlinks don't work, ensure you have the latest version of PyMuPDF installed
-- For RTF conversion issues, check that:
-  - Your RTF files are properly formatted
-  - You have proper access permissions to read/write files
-  - On Windows, no Word processes are running (the utility attempts to close them)
-- If TOC links aren't working, verify that:
-  - The `filepath` column in your data matches the actual file paths
-  - The page mapping is correctly generated
+1. **Word COM Automation Issues**
+   - Ensure Microsoft Word is installed
+   - Close any open Word instances
+   - Run the application with administrator privileges
+   - Check if Word is properly registered in the system
 
-## Advanced Usage
+2. **File Conversion Failures**
+   - Check file permissions
+   - Verify RTF files are not corrupted
+   - Ensure filenames follow the required format
+   - Check if the output directory is writable
 
-For more advanced usage or integration into other workflows, you can import and use the individual functions:
+3. **Section Mapping Issues**
+   - Verify Excel file format
+   - Check section numbers match ICH categories
+   - Ensure filenames match exactly
+   - Validate Excel file column names
 
-```python
-from src.rtf_parser import build_title_dataframe
-from src.data_processing import load_filename_section_map, load_ich_categories_map, merge_and_validate, create_toc_structure, convert_all
-from src.pdf_utils import combine_pdfs, generate_toc_pdf, prepend_toc_to_pdf
+## Contributing
 
-# Your custom implementation here
-```
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 
-[Your license information here]
+[Your License Here]
 
-## Credits
+## Acknowledgments
 
-[Your credits information here] 
+- Microsoft Word COM automation
+- FPDF2 for PDF generation
+- PyMuPDF for PDF manipulation
