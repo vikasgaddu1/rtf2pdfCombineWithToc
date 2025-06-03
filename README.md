@@ -31,8 +31,7 @@ A Python application that converts RTF files to PDF and combines them into a sin
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
-cd rtf2pdfcombine
+git clone https://github.com/vikasgaddu1/rtf2pdfCombineWithToc.git
 ```
 
 2. Create and activate a virtual environment (recommended):
