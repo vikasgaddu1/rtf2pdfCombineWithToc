@@ -10,5 +10,8 @@ openpyxl>=3.0.0
 Pillow>=9.0.0
 reportlab>=3.6.0
 
+# For building executables
+pyinstaller>=5.10.0
+
 # For testing
 pytest>=7.0.0
