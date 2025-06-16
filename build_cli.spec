@@ -4,7 +4,7 @@ block_cipher = None
 
 # Define the analysis for the CLI version
 a = Analysis(
-    ['main.py'],
+    ['src/cli.py'],  # Changed from main.py to src/cli.py
     pathex=[],
     binaries=[],
     datas=[
@@ -53,7 +53,8 @@ a = Analysis(
         'pathlib',
         'logging',
         'os',
-        'sys'
+        'sys',
+        'argparse'  # Added for CLI argument parsing
     ],
     hookspath=[],
     hooksconfig={},

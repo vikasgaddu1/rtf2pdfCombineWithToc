@@ -3,10 +3,10 @@ echo ========================================
 echo RTF2PDF Build Script
 echo ========================================
 
-REM Check if Python is available
-python --version >nul 2>&1
+REM Check if py is available
+py --version >nul 2>&1
 if errorlevel 1 (
-    echo ERROR: Python is not installed or not in PATH
+    echo ERROR: py is not installed or not in PATH
     pause
     exit /b 1
 )

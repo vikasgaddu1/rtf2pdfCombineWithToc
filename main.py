@@ -109,41 +109,35 @@ def main(config: GUIConfig = None, progress_callback=None):
     toc_intermediate_pdf_path = config.get_intermediate_toc_path()
     combined_content_pdf_path = config.get_intermediate_combined_path()
     final_output_pdf_path = config.get_final_output_path()
-
-    logging.info("Starting PDF Combination Process...")
-    if progress_callback:
-        progress_callback(0)
-
-    # --- Step 1: Scan RTFs and Extract Titles ---
-    logging.info(f"1. Scanning RTF files in: {input_folder}")
+    
+    # --- Step 1: Extract Titles from RTF Files ---
+    logging.info("1. Extracting titles from RTF files...")
     titles_df = build_title_dataframe(input_folder)
     if titles_df.empty:
-        logging.error("No RTF titles found; aborting.")
+        logging.error("No RTF files found in input folder")
         sys.exit(1)
-    logging.info(f"   Found {len(titles_df)} RTF files with potential titles.")
+    logging.info(f"   Found {len(titles_df)} RTF files.")
     if progress_callback:
         progress_callback(10)
-
-    # --- Step 2: Load Mapping Files or Create Automatic Sections ---
-    mismatch_report = None  # Initialize for both modes
     
+    # --- Step 2: Load Section Mapping & Merge with Titles ---
     if config.use_section_file:
-        logging.info(f"2. Loading mapping files from: {docs_folder}")
-        try:
-            filename_map = load_filename_section_map(file_section_xlsx)
-            ich_map = load_ich_categories_map(ich_categories_xlsx)
-            # Merge and validate using the mapping files - now returns report too
-            final_df, mismatch_report = merge_and_validate(titles_df, filename_map, ich_map)
-            
-            # Save mismatch report to file if there are any mismatches
-            if mismatch_report and mismatch_report['total_mismatched'] > 0:
-                report_path = output_folder / "file_mismatch_report.txt"
-                save_mismatch_report_to_file(mismatch_report, report_path)
-                
-        except (FileNotFoundError, KeyError) as e:
-            logging.error(f"Failed to load mapping files: {e}")
+        logging.info("2. Loading section mapping from Excel file...")
+        section_df = load_filename_section_map(file_section_xlsx)
+        ich_df = load_ich_categories_map(ich_categories_xlsx)
+        
+        # Merge and validate
+        final_df, mismatch_df = merge_and_validate(titles_df, section_df, ich_df)
+        
+        if final_df.empty:
+            logging.error("No valid files remained after section mapping; aborting.")
             sys.exit(1)
-        logging.info("   Mapping files loaded successfully.")
+            
+        # Save mismatch report if there were any mismatches
+        if not mismatch_df.empty:
+            mismatch_report_path = output_folder / "file_mismatch_report.txt"
+            save_mismatch_report_to_file(mismatch_df, mismatch_report_path)
+            logging.warning(f"   Found {len(mismatch_df)} file mismatches. Report saved to: {mismatch_report_path}")
     else:
         logging.info("2. Creating automatic sections based on filename prefixes...")
         final_df = create_automatic_sections(titles_df)
@@ -154,7 +148,7 @@ def main(config: GUIConfig = None, progress_callback=None):
         # No mismatch report in automatic mode as all input files are used
     if progress_callback:
         progress_callback(20)
-
+    
     # Ensure required columns exist for later steps
     required_cols = {'filepath', 'title', 'section_number', 'filename_stem'}
     if not required_cols.issubset(final_df.columns):
@@ -171,7 +165,7 @@ def main(config: GUIConfig = None, progress_callback=None):
     logging.info(f"   Validated {len(final_df)} files for processing.")
     if progress_callback:
         progress_callback(30)
-
+    
     # --- Step 3: Create TOC Data Structure ---
     logging.info("3. Creating Table of Contents data structure...")
     toc_data = create_toc_structure(final_df)
@@ -181,7 +175,7 @@ def main(config: GUIConfig = None, progress_callback=None):
     logging.info("   TOC data structure created.")
     if progress_callback:
         progress_callback(40)
-
+    
     # --- Step 4: Cleanup Output PDF Folder ---
     logging.info(f"4. Checking and clearing intermediate PDF output folder: {output_pdf_folder}")
     output_pdf_folder.mkdir(parents=True, exist_ok=True)
@@ -200,7 +194,7 @@ def main(config: GUIConfig = None, progress_callback=None):
         logging.info("   Intermediate PDF folder is empty or contains no PDFs.")
     if progress_callback:
         progress_callback(50)
-
+    
     # --- Step 5: Convert RTFs to Individual PDFs ---
     logging.info(f"5. Converting {len(final_df)} RTF files to PDF in {output_pdf_folder}...")
     
@@ -216,7 +210,7 @@ def main(config: GUIConfig = None, progress_callback=None):
         sys.exit(1)
     if progress_callback:
         progress_callback(60)
-
+    
     # --- Step 6: Combine Individual PDFs & Create Bookmarks ---
     logging.info(f"6. Combining individual PDFs into '{combined_content_pdf_path.name}' with bookmarks...")
     combined_pdf_path, page_map = combine_pdfs(final_df, output_pdf_folder, combined_content_pdf_path)
@@ -224,47 +218,43 @@ def main(config: GUIConfig = None, progress_callback=None):
         logging.error("Failed to combine PDF files or generate page map; aborting.")
         sys.exit(1)
     logging.info(f"   Combined content PDF created at: {combined_pdf_path}")
-    logging.info(f"   Generated page map for {len(page_map)} entries.")
     if progress_callback:
         progress_callback(70)
-
-    # --- Step 7: Generate Final TOC PDF with Links ---
-    logging.info(f"7. Generating final TOC PDF ('{toc_intermediate_pdf_path.name}') with links...")
-    final_toc_path, toc_page_count = generate_toc_pdf(toc_data, page_map, toc_intermediate_pdf_path, config)
-    if not final_toc_path or toc_page_count is None:
-        logging.error("Failed to generate final TOC PDF; aborting.")
+    
+    # --- Step 7: Generate TOC PDF ---
+    logging.info("7. Generating Table of Contents PDF...")
+    toc_pdf_path = generate_toc_pdf(toc_data, page_map, toc_intermediate_pdf_path)
+    if not toc_pdf_path:
+        logging.error("Failed to generate TOC PDF; aborting.")
         sys.exit(1)
-    logging.info(f"   Final TOC PDF created at: {final_toc_path} ({toc_page_count} pages)")
+    logging.info(f"   TOC PDF created at: {toc_pdf_path}")
     if progress_callback:
         progress_callback(80)
-
-    # --- Step 8: Prepend TOC to Content PDF ---
-    logging.info(f"8. Prepending TOC to content PDF to create final document: '{final_output_pdf_path.name}'...")
-    final_doc_path = prepend_toc_to_pdf(final_toc_path, combined_pdf_path, final_output_pdf_path, final_df, page_map)
-    if not final_doc_path:
-        logging.error("Failed to prepend TOC and create final document; aborting.")
+    
+    # --- Step 8: Combine TOC with Content ---
+    logging.info(f"8. Combining TOC with content into final PDF: {final_output_pdf_path.name}")
+    final_pdf_path = prepend_toc_to_pdf(toc_pdf_path, combined_pdf_path, final_output_pdf_path)
+    if not final_pdf_path:
+        logging.error("Failed to create final combined PDF; aborting.")
         sys.exit(1)
-    logging.info(f"   Successfully created final document: {final_doc_path}")
+    logging.info(f"   Final PDF created at: {final_pdf_path}")
     if progress_callback:
         progress_callback(90)
-
-    # --- Step 9: Cleanup of Intermediate Files ---
+    
+    # --- Step 9: Cleanup Intermediate Files ---
+    logging.info("9. Cleaning up intermediate files...")
     try:
-        logging.info("9. Cleaning up intermediate files...")
-        if toc_intermediate_pdf_path.exists():
-            os.remove(toc_intermediate_pdf_path)
-            logging.info(f"   Removed intermediate TOC: {toc_intermediate_pdf_path.name}")
-        if combined_content_pdf_path.exists():
-            os.remove(combined_content_pdf_path)
-            logging.info(f"   Removed intermediate combined content: {combined_content_pdf_path.name}")
-    except OSError as e:
-        logging.warning(f"   Warning: Could not clean up intermediate file: {e}")
-
-    logging.info("--- PDF Combination Process Completed Successfully! ---")
+        toc_pdf_path.unlink()
+        combined_pdf_path.unlink()
+        logging.info("   Intermediate files cleaned up.")
+    except Exception as e:
+        logging.warning(f"   Could not clean up some intermediate files: {e}")
+    
+    logging.info("Processing completed successfully!")
     if progress_callback:
         progress_callback(100)
 
-
 if __name__ == "__main__":
-    # For command line usage, use default configuration
-    main()
+    # For command line usage, use the CLI implementation
+    from src.cli import main as cli_main
+    sys.exit(cli_main())

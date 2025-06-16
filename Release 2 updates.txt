@@ -1,0 +1,5 @@
+Potential updates to combine utility:
+
+1) Add a stop button to exit out gracefully.
+2) When the application finishes combine process, relenquish all resources held.
+3) Check the spacing in toc.

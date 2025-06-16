@@ -67,6 +67,31 @@ def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_pa
          # Consider raising an error instead or handling differently
          return None, None
 
+    # Detect if we're in automatic or manual mode by examining section headers
+    is_automatic_mode = False
+    if not toc_data.empty:
+        # Look for section headers in the TOC data
+        headers = toc_data[toc_data['type'] == 'header']
+        if not headers.empty:
+            # Check if headers follow automatic pattern (e.g., "1  Tables", "2  Figures", "3  Listings")
+            first_header = headers.iloc[0]['text']
+            # Automatic mode headers start with single digit followed by section name
+            if (isinstance(first_header, str) and 
+                len(first_header.split()) >= 2 and 
+                first_header.split()[0].isdigit() and 
+                int(first_header.split()[0]) <= 10):
+                is_automatic_mode = True
+    
+    # Determine TOC title based on mode
+    if is_automatic_mode:
+        toc_title = "Table of Contents"
+        title_align = 'C'  # Center align for automatic mode
+        logging.info("Detected automatic mode - using 'Table of Contents' title")
+    else:
+        toc_title = "14. TABLES, FIGURES AND GRAPHS REFERRED TO BUT NOT INCLUDED IN THE TEXT"
+        title_align = 'L'  # Left align for manual mode
+        logging.info("Detected manual mode - using ICH-specific title")
+
     try:
         # --- First Pass: Calculate TOC page count ---
         pdf_calc = FPDF(orientation='P', unit='mm', format='A4')
@@ -76,7 +101,7 @@ def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_pa
         pdf_calc.set_font(FONT, '', FONT_SIZE)
         pdf_calc.set_text_color(0, 0, 255)  # Set text color to blue
         pdf_calc.set_font_size(12)
-        pdf_calc.cell(CONTENT_WIDTH_MM, 10, "14. TABLES, FIGURES AND GRAPHS REFERRED TO BUT NOT INCLUDED IN THE TEXT", 0, 1, 'L')
+        pdf_calc.cell(CONTENT_WIDTH_MM, 10, toc_title, 0, 1, title_align)
         pdf_calc.ln(5)
 
         for _, row in toc_data.iterrows():
@@ -87,14 +112,28 @@ def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_pa
                 pdf_calc.ln(LINE_HEIGHT * 0.25)
                 pdf_calc.set_font(FONT, '', FONT_SIZE)
             elif row['type'] == 'entry':
-                # Simplified layout for calculation pass
+                # For calculation pass, estimate space needed for wrapped entries
                 pdf_calc.set_font(FONT, '', FONT_SIZE)
-                pdf_calc.set_text_color(0, 0, 255)  # Set text color to blue for entries
+                pdf_calc.set_text_color(0, 0, 255)
                 indent = "  " * (row['level'] - 1)
                 formatted_text = indent + str(row['text'])
-                pdf_calc.cell(CONTENT_WIDTH_MM * 0.8, LINE_HEIGHT, formatted_text, 0, 0) # Approximate width
-                pdf_calc.cell(CONTENT_WIDTH_MM * 0.2, LINE_HEIGHT, "999", 0, 1, 'R') # Placeholder page num
-                pdf_calc.ln(LINE_HEIGHT / 4)
+                
+                # Check if text will fit on one line (leaving space for dots and page number)
+                text_width = pdf_calc.get_string_width(formatted_text)
+                page_num_width = pdf_calc.get_string_width("999")  # Estimate
+                reserved_space = page_num_width + 30  # Space for page number and dots
+                
+                if text_width > (CONTENT_WIDTH_MM - reserved_space):
+                    # Text needs wrapping - use multi_cell to calculate height
+                    wrap_width = CONTENT_WIDTH_MM - reserved_space
+                    pdf_calc.multi_cell(wrap_width, LINE_HEIGHT, formatted_text, 0, 'L')
+                    # No need for extra space since dots go on the last line
+                    pdf_calc.ln(LINE_HEIGHT * 0.25)
+                else:
+                    # Single line entry
+                    pdf_calc.cell(CONTENT_WIDTH_MM * 0.8, LINE_HEIGHT, formatted_text, 0, 0)
+                    pdf_calc.cell(CONTENT_WIDTH_MM * 0.2, LINE_HEIGHT, "999", 0, 1, 'R')
+                    pdf_calc.ln(LINE_HEIGHT / 4)
 
         toc_page_count = pdf_calc.page_no()
         logging.info(f"Calculated TOC will require {toc_page_count} page(s).")
@@ -109,7 +148,7 @@ def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_pa
 
         # Add TOC Title
         pdf.set_font_size(12)
-        pdf.cell(CONTENT_WIDTH_MM, 10, "14. TABLES, FIGURES AND GRAPHS REFERRED TO BUT NOT INCLUDED IN THE TEXT", 0, 1, 'L')
+        pdf.cell(CONTENT_WIDTH_MM, 10, toc_title, 0, 1, title_align)
         pdf.ln(5)
 
         # Write TOC Entries without links - we'll add them in the final document
@@ -146,7 +185,8 @@ def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_pa
                     'text': clean_header_text,
                     'original_text': text,  # Keep original for debugging
                     'page_num_str': '',
-                    'is_header': True
+                    'is_header': True,
+                    'y_position': pdf.get_y()  # Store y position
                 })
 
             elif entry_type == 'entry':
@@ -165,39 +205,132 @@ def generate_toc_pdf(toc_data: pd.DataFrame, page_map: dict[str, int], output_pa
                     final_page_num = original_page_num + toc_page_count
                     final_page_num_str = str(final_page_num)
 
-                # Calculate space for dots
+                # Calculate if text needs wrapping
                 text_width = pdf.get_string_width(formatted_text)
                 current_page_num_width = pdf.get_string_width(final_page_num_str)
-                available_dots_width = CONTENT_WIDTH_MM - text_width - current_page_num_width - 1 # Subtract small buffer
-
-                dots = ""
-                if available_dots_width > 0 and dot_width > 0:
-                    num_dots = int(available_dots_width / dot_width)
-                    dots = dot_char * num_dots
-
-                # Record this entry's page for later link creation
-                if final_page_num is not None:
-                    # Store current page and position so we can add links later
-                    # Special fix for FEFOS01A - check if this is the FEFOS01A entry
-                    if "FEFOS01A" in formatted_text:
-                        logging.info(f"Found FEFOS01A entry with page {final_page_num_str}, original_page_num={original_page_num}")
-                        
-                    # Clean text before storing
-                    clean_formatted_text = clean_text(formatted_text)
+                # Reserve space for page number and some dots
+                reserved_space = current_page_num_width + 30  # Increased buffer for dots
+                
+                # Store the starting position for hyperlink creation
+                start_y = pdf.get_y()
+                start_page = pdf.page_no()
+                
+                if text_width > (CONTENT_WIDTH_MM - reserved_space):
+                    # Text needs wrapping
+                    logging.debug(f"Wrapping long title: {formatted_text[:50]}...")
                     
-                    toc_entries.append({
-                        'toc_page': pdf.page_no(),
-                        'target_page': final_page_num,
-                        'text': clean_formatted_text,
-                        'original_text': formatted_text,  # Keep original for debugging
-                        'page_num_str': final_page_num_str,
-                        'is_header': False
-                    })
+                    # Store current X position before multi_cell
+                    start_x = pdf.get_x()
+                    
+                    # Use multi_cell for the title with a specific width
+                    wrap_width = CONTENT_WIDTH_MM - reserved_space
+                    pdf.multi_cell(wrap_width, LINE_HEIGHT, formatted_text, 0, 'L')
+                    
+                    # Get position after multi_cell
+                    after_text_y = pdf.get_y()
+                    
+                    # For wrapped text, we need to find where the last line ends
+                    # Split the text into words and estimate the last line
+                    words = formatted_text.split()
+                    last_line_text = ""
+                    temp_text = ""
+                    
+                    # Build lines word by word to find what's on the last line
+                    for word in words:
+                        test_text = temp_text + " " + word if temp_text else word
+                        if pdf.get_string_width(test_text) <= wrap_width:
+                            temp_text = test_text
+                        else:
+                            last_line_text = temp_text
+                            temp_text = word
+                    # Don't forget the remaining text
+                    if temp_text:
+                        last_line_text = temp_text
+                    
+                    # Calculate where the last line of text ends
+                    last_line_text_width = pdf.get_string_width(last_line_text)
+                    
+                    # Move to the last line
+                    pdf.set_y(after_text_y - LINE_HEIGHT)
+                    pdf.set_x(MARGIN_MM)
+                    
+                    # Add a small gap after the text
+                    gap_width = 5  # 5mm gap between text and dots
+                    
+                    # Position after the last line text plus gap
+                    text_end_x = MARGIN_MM + last_line_text_width + gap_width
+                    
+                    # Calculate space for dots from text end to page number
+                    available_for_dots = CONTENT_WIDTH_MM - last_line_text_width - current_page_num_width - gap_width
+                    
+                    if available_for_dots > 0 and dot_width > 0:
+                        num_dots = int(available_for_dots / dot_width)
+                        dots = dot_char * num_dots
+                        
+                        # Position at the end of text plus gap
+                        pdf.set_x(text_end_x)
+                        # Add dots
+                        pdf.cell(available_for_dots, LINE_HEIGHT, dots, 0, 0, 'R')
+                    else:
+                        # No room for dots, just add page number
+                        pdf.set_x(MARGIN_MM + CONTENT_WIDTH_MM - current_page_num_width)
+                    
+                    # Add page number at the end
+                    pdf.cell(current_page_num_width, LINE_HEIGHT, final_page_num_str, 0, 1, 'R')
+                    
+                    # Store entry info with multi-line flag
+                    if final_page_num is not None:
+                        clean_formatted_text = clean_text(formatted_text)
+                        
+                        toc_entries.append({
+                            'toc_page': start_page,
+                            'target_page': final_page_num,
+                            'text': clean_formatted_text,
+                            'original_text': formatted_text,
+                            'page_num_str': final_page_num_str,
+                            'is_header': False,
+                            'y_position': start_y,
+                            'end_y_position': pdf.get_y(),
+                            'is_multiline': True,
+                            'first_words': ' '.join(formatted_text.split()[:5])  # Store first 5 words for matching
+                        })
+                    
+                else:
+                    # Single line entry - improved logic
+                    # Add a small gap between text and dots for better readability
+                    gap_width = 3  # 3mm gap
+                    
+                    # Calculate available space for dots with gap
+                    available_dots_width = CONTENT_WIDTH_MM - text_width - current_page_num_width - gap_width
 
-                # Add cells without links
-                pdf.cell(text_width, LINE_HEIGHT, formatted_text, 0, 0)
-                pdf.cell(available_dots_width, LINE_HEIGHT, dots, 0, 0, 'R')
-                pdf.cell(current_page_num_width, LINE_HEIGHT, final_page_num_str, 0, 1, 'R')
+                    dots = ""
+                    if available_dots_width > 0 and dot_width > 0:
+                        num_dots = int(available_dots_width / dot_width)
+                        dots = dot_char * num_dots
+
+                    # Record this entry's info
+                    if final_page_num is not None:
+                        clean_formatted_text = clean_text(formatted_text)
+                        
+                        toc_entries.append({
+                            'toc_page': pdf.page_no(),
+                            'target_page': final_page_num,
+                            'text': clean_formatted_text,
+                            'original_text': formatted_text,
+                            'page_num_str': final_page_num_str,
+                            'is_header': False,
+                            'y_position': start_y,
+                            'end_y_position': start_y + LINE_HEIGHT,
+                            'is_multiline': False,
+                            'first_words': ' '.join(formatted_text.split()[:5])
+                        })
+
+                    # Add cells with gap
+                    pdf.cell(text_width, LINE_HEIGHT, formatted_text, 0, 0)
+                    pdf.cell(gap_width, LINE_HEIGHT, "", 0, 0)  # Gap between text and dots
+                    pdf.cell(available_dots_width, LINE_HEIGHT, dots, 0, 0, 'R')
+                    pdf.cell(current_page_num_width, LINE_HEIGHT, final_page_num_str, 0, 1, 'R')
+                
                 pdf.ln(LINE_HEIGHT / 4) # Keep small space between entries
 
         # --- Save PDF ---
@@ -422,7 +555,9 @@ def prepend_toc_to_pdf(toc_pdf_path: Path, content_pdf_path: Path, final_output_
                             line_text_stripped = line_text.strip()
                             
                             # Check for main title
-                            if line_text_stripped.startswith("14. TABLES") or "TABLES, FIGURES AND GRAPHS" in line_text_stripped:
+                            if (line_text_stripped.startswith("14. TABLES") or 
+                                "TABLES, FIGURES AND GRAPHS" in line_text_stripped or
+                                line_text_stripped == "Table of Contents"):
                                 main_title_line = {
                                     'page': page_idx,
                                     'rect': fitz.Rect(line["bbox"]),
@@ -452,57 +587,98 @@ def prepend_toc_to_pdf(toc_pdf_path: Path, content_pdf_path: Path, final_output_
                     # Get the page
                     page = doc[toc_page_idx]
                     
-                    # Find the line with this entry's text and page number
+                    # Enhanced matching for wrapped titles
+                    is_multiline = entry.get('is_multiline', False)
+                    page_num_str = entry['page_num_str']
+                    first_words = entry.get('first_words', '')
+                    
+                    # Find the line(s) with this entry
                     text_blocks = page.get_text("dict")["blocks"]
+                    entry_found = False
+                    entry_rect = None
+                    
                     for block in text_blocks:
                         for line in block.get("lines", []):
                             line_text = "".join(span.get("text", "") for span in line.get("spans", []))
                             line_text_stripped = line_text.strip()
                             
-                            # Skip section headers in automatic mode (format: "1 Tables", "2 Figures", "3 Listings")
+                            # Skip section headers in automatic mode
                             if (len(line_text_stripped.split()) >= 2 and
                                 line_text_stripped.split()[0].isdigit() and
                                 any(word.lower() in ['tables', 'figures', 'listings'] for word in line_text_stripped.split()[1:])):
-                                logging.debug(f"Skipping automatic mode section header: '{line_text_stripped}'")
                                 continue
                             
                             # Skip main title
-                            if "TABLES, FIGURES AND GRAPHS" in line_text_stripped:
+                            if ("TABLES, FIGURES AND GRAPHS" in line_text_stripped or
+                                line_text_stripped == "Table of Contents"):
                                 continue
                             
-                            # Check if this line contains the entry's page number and looks like a TOC entry
-                            page_num_str = entry['page_num_str']
-                            entry_text_clean = clean_text(entry['text']).strip()
-                            
-                            # For automatic mode, look for lines that:
-                            # 1. Contain the page number at the end
-                            # 2. Are not section headers
-                            # 3. Have dots leading to the page number (typical TOC format)
-                            if (page_num_str in line_text and 
-                                not line_text_stripped.split()[0].isdigit() and  # Not a section header
-                                ('.' * 3) in line_text and  # Has dots (TOC format)
-                                line_text.strip().endswith(page_num_str)):  # Ends with page number
-                                
-                                logging.info(f"Auto mode: Found TOC entry line for page {page_num_str}: '{line_text_stripped[:50]}...'")
-                                
-                                # Create hyperlink for the entire line
-                                rect = fitz.Rect(line["bbox"])
-                                expanded_rect = fitz.Rect(
-                                    MARGIN_MM,
-                                    rect.y0,
-                                    page.rect.width - MARGIN_MM,
-                                    rect.y1
-                                )
-                                
-                                page.insert_link({
-                                    "kind": fitz.LINK_GOTO,
-                                    "from": expanded_rect,
-                                    "page": target_page_idx,
-                                    "zoom": 0
-                                })
-                                
-                                logging.debug(f"Added automatic mode link from TOC page {toc_page_idx+1} to target page {target_page_idx+1}")
-                                break
+                            # For multi-line entries, match by first words or page number
+                            if is_multiline:
+                                # Check if this line contains the beginning of our entry
+                                if first_words and first_words in line_text:
+                                    # This is the start of our multi-line entry
+                                    entry_rect = fitz.Rect(line["bbox"])
+                                    entry_found = True
+                                    logging.debug(f"Found start of multi-line entry: '{line_text_stripped[:50]}...'")
+                                # Or check if it's a line with just dots and page number
+                                elif page_num_str in line_text and ('.' * 3) in line_text and line_text.strip().endswith(page_num_str):
+                                    # This is the end line with page number
+                                    if entry_rect:
+                                        # Expand rect to include this line
+                                        entry_rect = entry_rect | fitz.Rect(line["bbox"])
+                                    else:
+                                        entry_rect = fitz.Rect(line["bbox"])
+                                    
+                                    # Create hyperlink for the entire multi-line entry
+                                    expanded_rect = fitz.Rect(
+                                        MARGIN_MM,
+                                        entry_rect.y0,
+                                        page.rect.width - MARGIN_MM,
+                                        entry_rect.y1
+                                    )
+                                    
+                                    page.insert_link({
+                                        "kind": fitz.LINK_GOTO,
+                                        "from": expanded_rect,
+                                        "page": target_page_idx,
+                                        "zoom": 0
+                                    })
+                                    
+                                    logging.info(f"Added multi-line link for entry ending with page {page_num_str}")
+                                    entry_found = False  # Reset for next entry
+                                    entry_rect = None
+                                    break
+                                # Continue building the rect if we're in a multi-line entry
+                                elif entry_found and entry_rect:
+                                    entry_rect = entry_rect | fitz.Rect(line["bbox"])
+                            else:
+                                # Single line entry - use existing logic
+                                if (page_num_str in line_text and 
+                                    not line_text_stripped.split()[0].isdigit() and
+                                    ('.' * 3) in line_text and
+                                    line_text.strip().endswith(page_num_str)):
+                                    
+                                    logging.info(f"Auto mode: Found single-line TOC entry for page {page_num_str}: '{line_text_stripped[:50]}...'")
+                                    
+                                    # Create hyperlink for the entire line
+                                    rect = fitz.Rect(line["bbox"])
+                                    expanded_rect = fitz.Rect(
+                                        MARGIN_MM,
+                                        rect.y0,
+                                        page.rect.width - MARGIN_MM,
+                                        rect.y1
+                                    )
+                                    
+                                    page.insert_link({
+                                        "kind": fitz.LINK_GOTO,
+                                        "from": expanded_rect,
+                                        "page": target_page_idx,
+                                        "zoom": 0
+                                    })
+                                    
+                                    logging.debug(f"Added automatic mode link from TOC page {toc_page_idx+1} to target page {target_page_idx+1}")
+                                    break
             else:
                 # Manual mode: sections are "14.1 Something", "14.3 Something"
                 logging.info("Using manual mode hyperlink creation logic")
@@ -521,14 +697,16 @@ def prepend_toc_to_pdf(toc_pdf_path: Path, content_pdf_path: Path, final_output_
                             line_text_stripped = line_text.strip()
                             
                             # Check for main title
-                            if line_text_stripped.startswith("14. TABLES") or "TABLES, FIGURES AND GRAPHS" in line_text_stripped:
+                            if (line_text_stripped.startswith("14. TABLES") or 
+                                "TABLES, FIGURES AND GRAPHS" in line_text_stripped or
+                                line_text_stripped == "Table of Contents"):
                                 main_title_line = {
                                     'page': page_idx,
                                     'rect': fitz.Rect(line["bbox"]),
                                     'text': line_text_stripped
                                 }
                                 logging.info(f"Identified main title on page {page_idx+1}: '{line_text_stripped}'")
-                                continue
+                                break
                             
                             # Check for manual mode section header patterns (14.1, 14.3, etc.)
                             if (line_text_stripped and
@@ -558,8 +736,16 @@ def prepend_toc_to_pdf(toc_pdf_path: Path, content_pdf_path: Path, final_output_
                     # Get the page
                     page = doc[toc_page_idx]
                     
-                    # Find the line with the page number in it
+                    # Enhanced matching for wrapped titles
+                    is_multiline = entry.get('is_multiline', False)
+                    page_num_str = entry['page_num_str']
+                    first_words = entry.get('first_words', '')
+                    
+                    # Find the line(s) with this entry
                     text_blocks = page.get_text("dict")["blocks"]
+                    entry_found = False
+                    entry_rect = None
+                    
                     for block in text_blocks:
                         for line in block.get("lines", []):
                             line_text = "".join(span.get("text", "") for span in line.get("spans", []))
@@ -569,7 +755,6 @@ def prepend_toc_to_pdf(toc_pdf_path: Path, content_pdf_path: Path, final_output_
                             
                             # Check if this line is the main title - never add hyperlinks to it
                             if main_title_line and main_title_line['page'] == toc_page_idx and main_title_line['rect'].intersects(rect):
-                                logging.debug(f"Skipping hyperlink for main title: '{line_text.strip()}'")
                                 continue
                             
                             # Check if this line is a section header
@@ -577,38 +762,73 @@ def prepend_toc_to_pdf(toc_pdf_path: Path, content_pdf_path: Path, final_output_
                             for header_line in section_header_lines:
                                 if header_line['page'] == toc_page_idx and header_line['rect'].intersects(rect):
                                     is_section_header = True
-                                    logging.debug(f"Found matching section header: '{line_text.strip()}'")
                                     break
                             
-                            # Skip section headers - don't add hyperlinks
+                            # Skip section headers
                             if is_section_header:
-                                logging.debug(f"Skipping hyperlink for section header: '{line_text.strip()}'")
                                 continue
                             
-                            # If this line contains the target page number and looks like a TOC entry
-                            text_to_find = entry['page_num_str']
-                            
-                            # For manual mode, look for lines that contain the page number
-                            if text_to_find in line_text and line_text.strip().endswith(text_to_find):
-                                logging.info(f"Manual mode: Found match for entry with page {text_to_find}: '{line_text.strip()[:50]}...'")
-                                
-                                # Create hyperlink for the entire line
-                                expanded_rect = fitz.Rect(
-                                    MARGIN_MM,
-                                    rect.y0,
-                                    page.rect.width - MARGIN_MM,
-                                    rect.y1
-                                )
-                                
-                                page.insert_link({
-                                    "kind": fitz.LINK_GOTO,
-                                    "from": expanded_rect,
-                                    "page": target_page_idx,
-                                    "zoom": 0
-                                })
-                                
-                                logging.debug(f"Added manual mode link from TOC page {toc_page_idx+1} to target page {target_page_idx+1}")
-                                break
+                            # For multi-line entries, match by first words or page number
+                            if is_multiline:
+                                # Check if this line contains the beginning of our entry
+                                if first_words and first_words in line_text:
+                                    # This is the start of our multi-line entry
+                                    entry_rect = fitz.Rect(line["bbox"])
+                                    entry_found = True
+                                    logging.debug(f"Found start of multi-line entry: '{line_text.strip()[:50]}...'")
+                                # Or check if it's a line with page number at the end
+                                elif page_num_str in line_text and line_text.strip().endswith(page_num_str):
+                                    # This is the end line with page number
+                                    if entry_rect:
+                                        # Expand rect to include this line
+                                        entry_rect = entry_rect | fitz.Rect(line["bbox"])
+                                    else:
+                                        entry_rect = fitz.Rect(line["bbox"])
+                                    
+                                    # Create hyperlink for the entire multi-line entry
+                                    expanded_rect = fitz.Rect(
+                                        MARGIN_MM,
+                                        entry_rect.y0,
+                                        page.rect.width - MARGIN_MM,
+                                        entry_rect.y1
+                                    )
+                                    
+                                    page.insert_link({
+                                        "kind": fitz.LINK_GOTO,
+                                        "from": expanded_rect,
+                                        "page": target_page_idx,
+                                        "zoom": 0
+                                    })
+                                    
+                                    logging.info(f"Added multi-line link for manual mode entry ending with page {page_num_str}")
+                                    entry_found = False  # Reset for next entry
+                                    entry_rect = None
+                                    break
+                                # Continue building the rect if we're in a multi-line entry
+                                elif entry_found and entry_rect:
+                                    entry_rect = entry_rect | fitz.Rect(line["bbox"])
+                            else:
+                                # Single line entry - use existing logic
+                                if page_num_str in line_text and line_text.strip().endswith(page_num_str):
+                                    logging.info(f"Manual mode: Found single-line match for entry with page {page_num_str}: '{line_text.strip()[:50]}...'")
+                                    
+                                    # Create hyperlink for the entire line
+                                    expanded_rect = fitz.Rect(
+                                        MARGIN_MM,
+                                        rect.y0,
+                                        page.rect.width - MARGIN_MM,
+                                        rect.y1
+                                    )
+                                    
+                                    page.insert_link({
+                                        "kind": fitz.LINK_GOTO,
+                                        "from": expanded_rect,
+                                        "page": target_page_idx,
+                                        "zoom": 0
+                                    })
+                                    
+                                    logging.debug(f"Added manual mode link from TOC page {toc_page_idx+1} to target page {target_page_idx+1}")
+                                    break
         
         # Generate bookmarks
         final_bookmarks = []

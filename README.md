@@ -90,6 +90,59 @@ The application generates:
 2. A combined PDF with table of contents and bookmarks
 3. Log output in the GUI showing conversion progress
 
+## Building Executable
+
+This project includes a PowerShell build script that creates standalone executable files for both GUI and CLI versions of the application using PyInstaller.
+
+### Prerequisites
+
+1. Ensure you have a virtual environment set up with all dependencies installed:
+```bash
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+2. Make sure PowerShell execution policy allows running scripts:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+### Running the Build Script
+
+1. **Open PowerShell** in the project root directory
+
+2. **Run the build script**:
+```powershell
+.\build.ps1
+```
+
+The build script will:
+- Check if the virtual environment exists
+- Activate the virtual environment automatically
+- Verify Python and pip are available from the venv
+- Install/update all dependencies
+- Build both GUI and CLI executables using PyInstaller
+- Deactivate the virtual environment when complete
+
+### Build Output
+
+After successful completion, you'll find the executables in the `dist` folder:
+- `RTF2PDF_GUI.exe` - Graphical user interface version
+- `RTF2PDF_CLI.exe` - Command-line interface version
+
+### Notes
+
+- The build process may show warnings about missing libraries (api-ms-win-crt-*.dll), but these are typically non-critical and the executables will still function properly
+- Make sure to copy the `docs` folder alongside the executables if your application requires it
+- The first build may take several minutes as PyInstaller analyzes all dependencies
+
+### Troubleshooting Build Issues
+
+1. **Execution Policy Error**: Run `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force`
+2. **Virtual Environment Not Found**: Ensure the `venv` folder exists in the project root
+3. **PyInstaller Errors**: Check that all dependencies are installed correctly in the virtual environment
+
 ## Project Structure
 
 ```
